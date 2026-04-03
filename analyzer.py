@@ -110,11 +110,13 @@ class VolatilityCrushAnalyzer:
         right_frame.grid(row=1, column=1, sticky=(tk.E, tk.N, tk.S), padx=(0, 10))
         right_frame.columnconfigure(0, weight=1)
 
+        # Left Frame
         self.setup_connection_section(left_frame, 0)
         self.setup_market_data_section(left_frame, 1)
         self.setup_current_straddle_section(left_frame, 2)
         self.setup_current_greeks_section(left_frame, 3)
 
+        # Right Frame
         self.setup_scenario_section(right_frame, 0)
         self.setup_pnl_section(right_frame, 1)
         self.setup_new_greeks_section(right_frame, 2)
@@ -166,4 +168,165 @@ class VolatilityCrushAnalyzer:
         self.fetch_btn = ttkButton(ticker_frame, text="Fetch Market Data", command=self.fetch_market_data)
         self.fetch_btn.pack(side=tk.RIGHT, padx=(0, 10))
 
-        # to do add implied vol - spot price 
+
+        # spot price, strike price, iv, days to expiry
+        ttk.Label(market_data_frame, text='Spot Price:').grid(row=1, column=0, sticky=tk.W, pady=(0, 8))
+        self.spot_price_var = tk.StringVar()
+        ttk.Entry(market_data_frame, textvariable=self.spot_price_var, width=12, font=("Helvetica", 12)).grid(row=1, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+        # strike price
+        ttk.Label(market_data_frame, text='Strike Price:').grid(row=2, column=0, sticky=tk.W, pady=(0, 8))
+        self.strike_price_var = tk.StringVar()
+        ttk.Entry(market_data_frame, textvariable=self.strike_price_var, width=12, font=("Helvetica", 12)).grid(row=2, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+
+        # iv
+        ttk.Label(market_data_frame, text='IV (%):').grid(row=3, column=0, sticky=tk.W, pady=(0, 8))
+        self.iv_var = tk.StringVar()
+        ttk.Entry(market_data_frame, textvariable=self.iv_var, width=12, font=("Helvetica", 12)).grid(row=3, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+        # days to expiry
+        ttk.Label(market_data_frame, text='Days to expiry:').grid(row=4, column=0, sticky=tk.W, pady=(0, 8))
+        self.days_var = tk.StringVar(value="30")
+        ttk.Entry(market_data_frame, textvariable=self.days_var, width=12, font=("Helvetica", 12)).grid(row=4, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+        # Price Straddle Button
+        self.price_btn = ttk.Button(market_data_frame, text="Price Straddle", command=self.price_current_straddle)
+        self.price_btn.grid(row=5, column=0, columnspan=2, padx=(10, 0))
+
+
+    def setup_current_straddle_section(self, parent, row):
+        pricing_frame = ttk.LabelFrame(parent, text="Current Straddle Price", padding="10")
+        pricing_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        pricing_frame.columnconfigure(1, weight=1)
+
+        # Label for call price
+        ttk.Label(pricing_frame, text='Call Price:').grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
+        self.call_price_label = ttk.Label(pricing_frame, text="$0.00", font=("Helvetica", 12, "bold"), foreground="green")
+        self.call_price_label.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+        # Label for put price
+        ttk.Label(pricing_frame, text='Put Price:').grid(row=1, column=0, sticky=tk.W, pady=(0, 8))
+        self.put_price_label = ttk.Label(pricing_frame, text="$0.00", font=("Helvetica", 12, "bold"), foreground="red")
+        self.put_price_label.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+        # Separator
+        separator = ttk.Separator(pricing_frame, orient='horizontal')
+        separator.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+
+        # Label for straddle price
+        ttk.Label(pricing_frame, text='Straddle Price:').grid(row=3, column=0, sticky=tk.W, pady=(0, 8))
+        self.straddle_price_label = ttk.Label(pricing_frame, text="$0.00", font=("Helvetica", 15, "bold"), foreground="blue")
+        self.straddle_price_label.grid(row=3, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+
+    def setup_current_greeks_section(self, parent, row):
+        greeks_frame = ttk.LabelFrame(parent, text="Current Greeks", padding="10")
+        greeks_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        greeks_frame.columnconfigure(1, weight=1)
+        greeks_frame.columnconfigure(3, weight=1)
+
+        # Label for delta
+        ttk.Label(greeks_frame, text='Delta:').grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
+        self.delta_label = ttk.Label(greeks_frame, text="0.00", font=("Helvetica", 10, "bold"))
+        self.delta_label.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        # Label for gamma
+        ttk.Label(greeks_frame, text='Gamma:').grid(row=0, column=2, sticky=tk.W, pady=(0, 8))
+        self.gamma_label = ttk.Label(greeks_frame, text="0.00", font=("Helvetica", 12, "bold"))
+        self.gamma_label.grid(row=0, column=3, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        #Label for vega
+        ttk.Label(greeks_frame, text='Vega:').grid(row=1, column=0, sticky=tk.W, pady=(0, 8))
+        self.vega_label = ttk.Label(greeks_frame, text="0.00", font=("Helvetica", 12, "bold"))
+        self.vega_label.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        # Label for theta
+        ttk.Label(greeks_frame, text='Theta:').grid(row=1, column=2, sticky=tk.W, pady=(0, 8))
+        self.theta_label = ttk.Label(greeks_frame, text="0.00", font=("Helvetica", 12, "bold"))
+        self.theta_label.grid(row=1, column=3, sticky=(tk.W, tk.E), pady=(0, 5))
+
+
+    def setup_scenario_section(self, parent, row):
+        scenario_frame = ttk.LabelFrame(parent, text="Scenarion Analysis", padding="10")
+        scenario_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
+        scenario_frame.columnconfigure(1, weight=1)
+
+        # new spot price
+        ttk.Label(scenario_frame, text='New Spot Price:').grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
+        self.new_spot_price_var = tk.StringVar()
+        ttk.Entry(scenario_frame, textvariable=self.new_spot_price_var, width=12, font=("Helvetica", 12)).grid(row=0, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+        # new IV
+        # make sure here that you know the IV units
+        ttk.Label(scenario_frame, text='New IV (%):').grid(row=1, column=0, sticky=tk.W, pady=(0, 8))
+        self.new_iv_var = tk.StringVar()
+        ttk.Entry(scenario_frame, textvariable=self.new_iv_var, width=12, font=("Helvetica", 12)).grid(row=1, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+        self.analyze_btn = ttk.Button(scenario_frame, text="Analyze Scenario", command=self.analyze_scenario, state='disabled')
+        self.analyze_btn.grid(row=2, column=0, columnspan=2, padx=(10, 0))
+
+
+    def setup_pnl_section(self, parent, row):
+        pnl_frame = ttk.LabelFrame(parent, text="P&L Analysis", padding="10")
+        pnl_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
+        pnl_frame.columnconfigure(1, weight=1)
+
+        # New straddle price
+        ttk.Label(pnl_frame, text='New Straddle Price:').grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
+        self.new_straddle_price_label = ttk.Label(pnl_frame, text="$0.00", font=("Helvetica", 15, "bold"))
+        self.new_straddle_price_label.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+        # separator
+        separator = ttk.Separator(pnl_frame, orient='horizontal')
+        separator.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(10, 0))
+
+        # Long Straddle P&L
+        ttk.Label(pnl_frame, text='Long Straddle P&L:').grid(row=2, column=0, sticky=tk.W, pady=(0, 8))
+        self.pnl_long_label = ttk.Label(pnl_frame, text="$0.00", font=("Helvetica", 15, "bold"))
+        self.pnl_long_label.grid(row=2, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+        # Short Straddle P&L
+        ttk.Label(pnl_frame, text='Short Straddle P&L:').grid(row=3, column=0, sticky=tk.W, pady=(0, 8))
+        self.pnl_short_label = ttk.Label(pnl_frame, text="$0.00", font=("Helvetica", 15, "bold"))
+        self.pnl_short_label.grid(row=3, column=1, sticky=(tk.W, tk.E))
+
+
+    def setup_new_greeks_section(self, parent, row):
+        new_greeks_frame = ttk.LabelFrame(parent, text="New Greeks", padding="10")
+        new_greeks_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
+        new_greeks_frame.columnconfigure(1, weight=1)
+        new_greeks_frame.columnconfigure(3, weight=1)
+
+
+        # New delta
+        ttk.Label(new_greeks_frame, text='New Delta:').grid(row=0, column=0, sticky=tk.W, pady=(0, 8))
+        self.new_delta_label = ttk.Label(new_greeks_frame, text="0.00", font=("Helvetica", 12, "bold"))
+        self.new_delta_label.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+
+        # New gamma
+        ttk.Label(new_greeks_frame, text='New Gamma:').grid(row=0, column=2, sticky=tk.W, pady=(0, 8))
+        self.new_gamma_label = ttk.Label(new_greeks_frame, text="0.00", font=("Helvetica", 12, "bold"))
+        self.new_gamma_label.grid(row=0, column=3, sticky=(tk.W, tk.E), pady=(0, 8))
+
+        # New vega
+        ttk.Label(new_greeks_frame, text='New Vega:').grid(row=1, column=0, sticky=tk.W, pady=(0, 8))
+        self.new_vega_label = ttk.Label(new_greeks_frame, text="0.00", font=("Helvetica", 12, "bold"))
+        self.new_vega_label.grid(row=1, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+        
+        # New theta
+        ttk.Label(new_greeks_frame, text='New Theta:').grid(row=1, column=2, sticky=tk.W, pady=(0, 8))
+        self.new_theta_label = ttk.Label(new_greeks_frame, text="0.00", font=("Helvetica", 12, "bold"))
+        self.new_theta_label.grid(row=1, column=3, sticky=(tk.W, tk.E), pady=(0, 8))
+
+
+    def setup_status_section(self, parent, row):
+        status_frame = ttk.LabelFrame(parent, text="Status", padding="10")
+        status_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 15))
+        status_frame.columnconfigure(1, weight=1)
+        status_frame.rowconfigure(0, weight=1)
+
+        # status label
+        self.status_var = tk.StringVar(value="Ready to connect to Alpaca...")
+        self.status_display = ttk.Label(status_frame, textvariable=self.status_var, wraplength=300, font=("Helvetica", 12, "bold"))
+        self.status_display.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 8))
