@@ -1,6 +1,7 @@
 import threading
 import time
-from tkinter import N
+import tkinter as tk
+from tkinter import ttk
 from turtle import width
 import pandas as pd
 import numpy as np
@@ -12,9 +13,11 @@ from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
+
+
 class AlpacaApp:
 
-    def __init__(self, api_key, secret_key):
+    def __init__(self, root, api_key, secret_key):
         self.api_key = api_key
         self.secret_key = secret_key
         
@@ -65,13 +68,16 @@ class AlpacaApp:
 
 class VolatilityCrushAnalyzer:
 
-    def __init__(self, root):
+    def __init__(self, root, api_key, secret_key):
         self.root = root
         self.root.title("Volatility Crush Analyzer")
-        self.root.geometry("800x600")
+        self.root.geometry("1000x700")
+
+        self.api_key = api_key
+        self.secret_key = secret_key
 
         # Alpaca API
-        self.alpaca_app = AlpacaApp(api_key, secret_key)
+        self.alpaca_app = AlpacaApp(root, api_key, secret_key)
         self.connected = False
 
         self.current_spot = None
@@ -129,6 +135,7 @@ class VolatilityCrushAnalyzer:
         connection_frame.columnconfigure(1, weight=1)
         connection_frame.columnconfigure(3, weight=1)
 
+        '''
         ttk.Label(connection_frame, text="Host:").grid(row=0, column=0, sticky=tk.W, pady=(0, 5))
         self.host_var = tk.StringVar(value='127.0.0.1')
         ttk.Entry(connection_frame, textvariable=self.host_var, width=20).grid(row=0, column=1, sticky=(tk.W, tk.E), pady=(0, 15))
@@ -136,6 +143,7 @@ class VolatilityCrushAnalyzer:
         ttk.Label(connection_frame, text="Port:").grid(row=0, column=2, sticky=tk.W, pady=(0, 5))
         self.port_var = tk.StringVar(value='7497')
         ttk.Entry(connection_frame, textvariable=self.port_var, width=10).grid(row=0, column=3, sticky=(tk.W, tk.E), pady=(0, 15))
+        '''
 
         button_frame = ttk.Frame(connection_frame)
         button_frame.grid(row=1, column=0, columnspan=4, pady=(0, 10))
@@ -165,30 +173,31 @@ class VolatilityCrushAnalyzer:
         ttk.Entry(ticker_frame, textvariable=self.ticker_var, width=12, font=("Helvetica", 12)).grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 8))
 
 
-        self.fetch_btn = ttkButton(ticker_frame, text="Fetch Market Data", command=self.fetch_market_data)
-        self.fetch_btn.pack(side=tk.RIGHT, padx=(0, 10))
+        # Fetch Market Data
+        self.fetch_btn = ttk.Button(ticker_frame, text="Fetch Market Data", command=self.fetch_market_data)
+        self.fetch_btn.grid(row=2, column=0, sticky=tk.W, pady=(0, 8))
 
 
         # spot price, strike price, iv, days to expiry
         ttk.Label(market_data_frame, text='Spot Price:').grid(row=1, column=0, sticky=tk.W, pady=(0, 8))
         self.spot_price_var = tk.StringVar()
-        ttk.Entry(market_data_frame, textvariable=self.spot_price_var, width=12, font=("Helvetica", 12)).grid(row=1, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+        ttk.Entry(market_data_frame, textvariable=self.spot_price_var, width=6, font=("Helvetica", 12)).grid(row=1, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
 
         # strike price
-        ttk.Label(market_data_frame, text='Strike Price:').grid(row=2, column=0, sticky=tk.W, pady=(0, 8))
+        ttk.Label(market_data_frame, text='Strike Price:').grid(row=1, column=2, sticky=tk.W, pady=(0, 8))
         self.strike_price_var = tk.StringVar()
-        ttk.Entry(market_data_frame, textvariable=self.strike_price_var, width=12, font=("Helvetica", 12)).grid(row=2, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+        ttk.Entry(market_data_frame, textvariable=self.strike_price_var, width=6, font=("Helvetica", 12)).grid(row=1, column=3, sticky=(tk.W, tk.E), pady=(0, 8))
 
 
         # iv
         ttk.Label(market_data_frame, text='IV (%):').grid(row=3, column=0, sticky=tk.W, pady=(0, 8))
         self.iv_var = tk.StringVar()
-        ttk.Entry(market_data_frame, textvariable=self.iv_var, width=12, font=("Helvetica", 12)).grid(row=3, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+        ttk.Entry(market_data_frame, textvariable=self.iv_var, width=6, font=("Helvetica", 12)).grid(row=3, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
 
         # days to expiry
-        ttk.Label(market_data_frame, text='Days to expiry:').grid(row=4, column=0, sticky=tk.W, pady=(0, 8))
+        ttk.Label(market_data_frame, text='Days to expiry:').grid(row=3, column=2, sticky=tk.W, pady=(0, 8))
         self.days_var = tk.StringVar(value="30")
-        ttk.Entry(market_data_frame, textvariable=self.days_var, width=12, font=("Helvetica", 12)).grid(row=4, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
+        ttk.Entry(market_data_frame, textvariable=self.days_var, width=6, font=("Helvetica", 12)).grid(row=3, column=3, sticky=(tk.W, tk.E), pady=(0, 8))
 
         # Price Straddle Button
         self.price_btn = ttk.Button(market_data_frame, text="Price Straddle", command=self.price_current_straddle)
@@ -330,3 +339,72 @@ class VolatilityCrushAnalyzer:
         self.status_var = tk.StringVar(value="Ready to connect to Alpaca...")
         self.status_display = ttk.Label(status_frame, textvariable=self.status_var, wraplength=300, font=("Helvetica", 12, "bold"))
         self.status_display.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 8))
+
+
+    def update_status(self, message):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.status_var.set(f"[{timestamp}] {message}")
+        self.root.update_idletasks()
+
+
+    def connect_alpaca(self):
+        try:
+
+            self.update_status(f"Connecting to Alpaca...")
+
+            # Try a simple API request to verify connection
+            test_symbol = self.ticker_var.get().upper() or "AAPL"
+
+            df = self.alpaca_app.get_historical_data(test_symbol, days=1)
+
+            print('Dataframe from alpaca', df)
+
+            if df is not None and not df.empty:
+                self.connected = True
+                self.alpaca_app.connected = True
+
+                self.status_label.config(text="Connected", foreground="green")
+                self.update_status(f"Connected to Alpaca. Data received for {test_symbol}")
+
+                # Enable buttons
+                self.disconnect_btn.config(state="normal")
+                self.connect_btn.config(state="disabled")
+                self.fetch_btn.config(state="normal")
+                self.analyze_btn.config(state="normal")
+
+            else:
+                raise Exception("No data returned from API")
+
+        except Exception as e:
+            self.connected = False
+            self.alpaca_app.connected = False
+
+            self.status_label.config(text="Disconnected", foreground="red")
+            self.update_status(f"Connection failed: {e}")
+
+
+    def price_current_straddle(self):
+        print('current straddle')
+
+    def analyze_scenario(self):
+        print('analyze scenario')
+
+    def disconnect_alpaca(self):
+        print('disconnect alpaca')
+
+    def fetch_market_data(self):
+        print('fetch market data')
+
+
+
+if __name__ == "__main__":
+    import tkinter as tk
+
+    root = tk.Tk()
+
+    # Define your API keys
+    api_key = "PKVXLBIDJUXQ6VEMWDH3MLPQ5C"
+    secret_key = "DBhhsymoUy6V2UuC8BBUJxMNc8pMdUwZoSm6kxeVHVq7"
+
+    app = VolatilityCrushAnalyzer(root, api_key, secret_key)
+    root.mainloop()
