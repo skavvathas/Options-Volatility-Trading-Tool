@@ -1,11 +1,11 @@
 import threading
 import time
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from turtle import width
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -36,30 +36,35 @@ class AlpacaApp:
             print(f"Connection error: {e}")
 
     def get_historical_data(self, symbol, timeframe=TimeFrame.Day, days=30):
+        symbol = str(symbol).strip().upper()
+        if not symbol:
+            return None
         try:
-            end = datetime.utcnow()
+            end = datetime.now(timezone.utc)
             start = end - timedelta(days=days)
 
             request = StockBarsRequest(
                 symbol_or_symbols=symbol,
                 timeframe=timeframe,
                 start=start,
-                end=end
+                end=end,
+                feed="iex"
             )
 
             bars = self.client.get_stock_bars(request)
-
             df = bars.df
 
-            # If multi-index (symbol, time), flatten it
-            if isinstance(df.index, pd.MultiIndex):
-                df = df.xs(symbol)
+            if df is None or df.empty:
+                return df
 
-            df = df.reset_index()
+            if isinstance(df.index, pd.MultiIndex):
+                if symbol not in df.index.get_level_values(0):
+                    return None
+                df = df.xs(symbol, level=0)
+
+            df = df.reset_index(drop=False)
 
             self.historical_data[symbol] = df
-
-            print(f"Historical data received for {symbol}")
             return df
 
         except Exception as e:
@@ -347,17 +352,17 @@ class VolatilityCrushAnalyzer:
         self.root.update_idletasks()
 
 
+    # Connect Alpaca 
     def connect_alpaca(self):
         try:
 
             self.update_status(f"Connecting to Alpaca...")
 
-            # Try a simple API request to verify connection
-            test_symbol = self.ticker_var.get().upper() or "AAPL"
+            # Daily bars need enough calendar days to include at least one session
+            # (weekends/holidays); days=1 often returns an empty frame and looks like failure.
+            test_symbol = (self.ticker_var.get() or "").strip().upper() or "AAPL"
 
-            df = self.alpaca_app.get_historical_data(test_symbol, days=1)
-
-            print('Dataframe from alpaca', df)
+            df = self.alpaca_app.get_historical_data(test_symbol, days=7)
 
             if df is not None and not df.empty:
                 self.connected = True
@@ -412,18 +417,72 @@ class VolatilityCrushAnalyzer:
         labels_to_reset = [
             self.call_price_label, self.put_price_label, self.straddle_price_label,
             self.delta_label, self.gamma_label, self.vega_label, self.theta_label,
-            self.new_straddle_label, self.pnl_long_label, self.pnl_short,
+            self.new_straddle_price_label, self.pnl_long_label, self.pnl_short_label,
             self.new_delta_label, self.new_gamma_label, self.new_vega_label, self.new_theta_label
         ]
 
         self.spot_price_var.set("")
-        self.strike_var.set("")
+        self.strike_price_var.set("")
         self.iv_var.set("")
-        self.new_spot_price.set("")
+        self.new_spot_price_var.set("")
         self.new_iv_var.set("")
 
+        for label in labels_to_reset:
+            if 'price' in str(label):
+                label.config(text="$0.00", foreground='black')
+            else:
+                label.config(text='0.000' if 'delta' in str(label) or 'gamma' in str(label) else "0.00", foreground='black')
+
+        if hasattr(self, 'alpaca_app') and self.alpaca_app:
+            self.alpaca_app.historical_data.clear()
+
+
     def fetch_market_data(self):
-        print('fetch market data')
+        if not self.connected:
+            messagebox.showerror("Error", "Not connected to Alpaca")
+            return
+
+        self.ticker = self.ticker_var.get().strip().upper()
+        if not self.ticker:
+            messagebox.showerror("Error", "Enter a ticker symbol")
+            return
+
+        self.update_status(f"Fetching historical data for {self.ticker}...")
+
+        self.alpaca_app.market_data.clear()
+        self.alpaca_app.historical_data.clear()
+
+        contract = self.create_equity_contract(self.ticker)
+        end_date = datetime.now()
+
+        try:
+            df = self.alpaca_app.get_historical_data(
+                self.ticker, timeframe=TimeFrame.Day, days=5
+            )
+            if df is None or df.empty:
+                self.update_status(f"No bars returned for {self.ticker}")
+                messagebox.showerror("Error", f"No market data for {self.ticker}")
+                return
+
+            if "close" not in df.columns:
+                self.update_status("Unexpected response: no 'close' column")
+                messagebox.showerror("Error", "Unexpected bar data format from Alpaca")
+                return
+
+            ts_col = "timestamp" if "timestamp" in df.columns else None
+            if ts_col:
+                df = df.sort_values(ts_col)
+            last = df.iloc[-1]
+            spot = float(last["close"])
+            self.spot_price_var.set(f"{spot:.2f}")
+            self.alpaca_app.market_data[self.ticker] = df
+            self.update_status(f"Loaded {len(df)} daily bar(s) for {self.ticker}; spot (last close) {spot:.2f}")
+        except Exception as e:
+            self.update_status(f"Fetch failed: {e}")
+            messagebox.showerror("Error", str(e))
+
+
+        
 
 
 
