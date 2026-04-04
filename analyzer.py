@@ -373,6 +373,7 @@ class VolatilityCrushAnalyzer:
                 self.analyze_btn.config(state="normal")
 
             else:
+                self.update_status(f"Connected but server is not available")
                 raise Exception("No data returned from API")
 
         except Exception as e:
@@ -390,7 +391,36 @@ class VolatilityCrushAnalyzer:
         print('analyze scenario')
 
     def disconnect_alpaca(self):
-        print('disconnect alpaca')
+        try: 
+            self.connected = False
+            self.connect_btn.config(state='normal')
+            self.disconnect_btn.config(state="disabled")
+            self.fetch_btn.config(state="disabled")
+            self.price_btn.config(state='disabled')
+            self.analyze_btn.config(state="disabled")
+            self.status_label.config(text='Disconnected', foreground='red')
+
+            self.clear_data()
+            self.update_status('Disconnected from Alpaca')
+        except Exception as e:
+            self.update_status(f'Disconnect error {e}')
+
+    def clear_data(self):
+        self.current_spot = None
+        self.current_iv = None
+
+        labels_to_reset = [
+            self.call_price_label, self.put_price_label, self.straddle_price_label,
+            self.delta_label, self.gamma_label, self.vega_label, self.theta_label,
+            self.new_straddle_label, self.pnl_long_label, self.pnl_short,
+            self.new_delta_label, self.new_gamma_label, self.new_vega_label, self.new_theta_label
+        ]
+
+        self.spot_price_var.set("")
+        self.strike_var.set("")
+        self.iv_var.set("")
+        self.new_spot_price.set("")
+        self.new_iv_var.set("")
 
     def fetch_market_data(self):
         print('fetch market data')
