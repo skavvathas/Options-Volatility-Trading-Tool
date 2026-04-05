@@ -758,6 +758,7 @@ class VolatilityCrushAnalyzer:
         self.update_status(f"Scenario complete: New price ${new_straddle_price:.2f}")
 
 
+    # Black Scholes
     def black_scholes_call(self, S, K, T, r, sigma):
         d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
@@ -770,7 +771,36 @@ class VolatilityCrushAnalyzer:
 
         return K * np.exp(-r*T) * norm.cdf(-d2) - S * norm.cdf(-d1)
 
-        
+    def calculate_delta(self, S, K, T, r, sigma, option_type='call'):
+        d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma * np.sqrt(T))
+        if option_type == 'call':
+            return norm.cdf(d1)
+        else: 
+            return -norm.cdf(-d1)
+
+    def calculate_gamma(self, S, K, T, r, sigma):
+        d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma * np.sqrt(T))
+        return norm.pdf(d1) / (S * sigma * np.sqrt(T))
+
+    def calculate_vega(self, S, K, T, r, sigma):
+        d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma * np.sqrt(T))
+        return S * norm.pdf(d1)*np.sqrt(T) / 100
+
+    def calculate_theta(self, S, K, T, r, sigma, option_type='call'):
+        d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+
+        if option_call == 'call':
+            theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) - r * K * np.exp(-r*T) * norm.cdf(d2)) / 365
+        else:
+            theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) + r * K * np.exp(-r*T) * norm.cdf(d2)) / 365
+
+        return theta
+
+
+
+
+
 
     def _dte_target_for_options(self):
         raw = (self.days_var.get() or "").strip()
