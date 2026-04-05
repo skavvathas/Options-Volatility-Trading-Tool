@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from datetime import date, datetime, timedelta, timezone
 import warnings
+from scipy.stats import norm
 warnings.filterwarnings('ignore')
 
 from alpaca.data.historical import OptionHistoricalDataClient, StockHistoricalDataClient
@@ -755,6 +756,19 @@ class VolatilityCrushAnalyzer:
         self.new_theta_label.config(text=f"{new_theta:.2f}")
 
         self.update_status(f"Scenario complete: New price ${new_straddle_price:.2f}")
+
+
+    def black_scholes_call(self, S, K, T, r, sigma):
+        d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+
+        return S * norm.cdf(d1) - K * np.exp(-r*T) * norm.cdf(d2)
+
+    def black_scholes_put(self, S, K, T, r, sigma):
+        d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma * np.sqrt(T))
+        d2 = d1 - sigma * np.sqrt(T)
+
+        return K * np.exp(-r*T) * norm.cdf(-d2) - S * norm.cdf(-d1)
 
         
 
