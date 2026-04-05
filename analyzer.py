@@ -712,6 +712,50 @@ class VolatilityCrushAnalyzer:
             messagebox.showerror("Error", "Invalid spot price or IV values")
             return
 
+        try:
+            K = float(self.strike_var.get())
+            days_to_expiry = int(self.days_var.get())
+        except ValueError:
+            messagebox.showerror("Error", "Invalid strike price or days to expiry")
+            return
+
+        T = days_to_expiry / 365.00
+        r = self.risk_free_rate
+
+        new_call_price = self.black_scholes_call(new_spot, K, T, r, new_iv)
+        new_put_price = self.black_scholes_put(new_spot, K, T, r, new_iv)
+        new_straddle_price = new_call_price + new_put_price
+
+        original_straddle_price = float(self.straddle_price_label.cget('text').replace('$', ''))
+
+        # pnl long and pnl short
+        pnl_long = new_straddle_price - original_straddle_price
+        pnl_short = - pnl_long
+
+        self.new_straddle_label.config(text=f"${new_straddle_price:.2f}", foreground='blue')
+
+        long_color = 'green' if pnl_long > 0 else 'red'
+
+        short_color = 'green' if pnl_short > 0 else 'red'
+
+        self.pnl_long_label.config(text=f"{pnl_long:+.2f}", foreground=long_color)
+        self.pnl_short_label.config(text=f"{pnl_short:+.2f}", foreground=short_color)
+
+        # New Greeks
+        new_delta = self.calculate_delta(new_spot, K, T, r, new_iv, 'call') + self.calculate_delta(new_spot, K, T, r, new_iv, 'put')
+        new_gamma = self.calculate_gamma(new_spot, K, T, r, new_iv)
+        new_vega = self.calculate_vega(new_spot, K, T, r, new_iv)*2
+        new_theta = self.calculate_theta(new_spot, K, T, r, new_iv, 'call') + self.calculate_delta(new_spot, K, T, r, new_iv, 'put')
+
+
+        # new delta - gamma - vega - theta 
+        self.new_delta_label.config(text=f"{new_delta:.3f}")
+        self.new_gamma_label.config(text=f"{new_gamma:.3f}")
+        self.new_vega_label.config(text=f"{new_vega:.2f}")
+        self.new_theta_label.config(text=f"{new_theta:.2f}")
+
+        self.update_status(f"Scenario complete: New price ${new_straddle_price:.2f}")
+
         
 
     def _dte_target_for_options(self):
