@@ -1,18 +1,50 @@
 import threading
 import time
+import re
 import tkinter as tk
 from tkinter import ttk, messagebox
 from turtle import width
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import warnings
 warnings.filterwarnings('ignore')
 
-from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
+from alpaca.data.historical import OptionHistoricalDataClient, StockHistoricalDataClient
+from alpaca.data.requests import OptionChainRequest, StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
+from alpaca.trading.enums import ContractType
 
+
+def _parse_osi_option_symbol(sym: str):
+    """
+    Turn an Alpaca option ticker string into expiry, call/put, and strike.
+
+    US equity options use a fixed tail format (OCC / OSI style), for example:
+        AAPL240628C00200000
+        |    |     | |
+        root YYMMDD C/P strike encoded as 8 digits (strike dollars * 1000)
+
+    We only need the last 15 characters: 6 date + 1 C or P + 8 strike digits.
+    Everything before that is the underlying root (length varies: AAPL, SPY, etc.).
+    """
+    sym = sym.strip().upper()
+    if len(sym) < 16:
+        return None
+    # Last 15 chars are always YYMMDD + C|P + 8-digit strike
+    tail = sym[-15:]
+    root = sym[:-15]
+    yymmdd, cp, strike_s = tail[:6], tail[6], tail[7:]
+    if cp not in ("C", "P") or not yymmdd.isdigit() or not strike_s.isdigit():
+        return None
+    yy, mm, dd = int(yymmdd[:2]), int(yymmdd[2:4]), int(yymmdd[4:6])
+    try:
+        exp = date(2000 + yy, mm, dd)
+    except ValueError:
+        return None
+    # Strike is stored in thousandths of a dollar (200.00 -> 00200000)
+    strike = int(strike_s) / 1000.0
+    return {"root": root, "expiration": exp, "right": cp, "strike": strike}
 
 
 class AlpacaApp:
@@ -21,8 +53,11 @@ class AlpacaApp:
         self.api_key = api_key
         self.secret_key = secret_key
         
+        # Stock bars: OHLCV only (no implied vol).
         self.client = StockHistoricalDataClient(api_key, secret_key)
-        
+        # Options endpoints: snapshots / chain include implied_volatility and greeks.
+        self.option_client = OptionHistoricalDataClient(api_key, secret_key)
+
         self.connected = False
         self.market_data = {}
         self.historical_data = {}
@@ -36,6 +71,13 @@ class AlpacaApp:
             print(f"Connection error: {e}")
 
     def get_historical_data(self, symbol, timeframe=TimeFrame.Day, days=30):
+        """
+        Download historical *stock* bars for `symbol` (not options).
+
+        Returns a pandas DataFrame with at least OHLCV; there is no IV on stocks.
+        Alpaca returns one row per bar; for a single ticker we peel off the
+        (symbol, timestamp) MultiIndex so you get a flat table.
+        """
         symbol = str(symbol).strip().upper()
         if not symbol:
             return None
@@ -57,6 +99,7 @@ class AlpacaApp:
             if df is None or df.empty:
                 return df
 
+            # MultiIndex level 0 = symbol, level 1 = bar time — keep only our symbol
             if isinstance(df.index, pd.MultiIndex):
                 if symbol not in df.index.get_level_values(0):
                     return None
@@ -70,6 +113,90 @@ class AlpacaApp:
         except Exception as e:
             print(f"Error fetching historical data: {e}")
             return None
+
+    def get_near_atm_call_iv(self, underlying, spot, strike_target, dte_target):
+        """
+        Fetch one implied-volatility number from Alpaca *options* data.
+
+        Important:
+        - `get_stock_bars` / stock data never includes IV.
+        - Option *bars* are still just OHLCV; IV lives on option *snapshots* / chain.
+        Here we call `get_option_chain` (snapshots for all matching contracts),
+        then pick the call whose expiry and strike are closest to what you asked for.
+
+        Args:
+            underlying: Stock ticker, e.g. "AAPL".
+            spot: Last stock price (used to widen strike search if needed).
+            strike_target: Prefer IV near this strike (often = spot or your strike field).
+            dte_target: Prefer expiries about this many calendar days out (from UI).
+        """
+        underlying = str(underlying).strip().upper()
+        today = date.today()
+        # Window around the user's "days to expiry" so we still find expiries after weekends.
+        exp_start = today + timedelta(days=max(1, dte_target - 14))
+        exp_end = today + timedelta(days=dte_target + 14)
+
+        # Try a tight strike band first (less data), then wider, then drop strike filter entirely.
+        strike_bands = [
+            (
+                min(strike_target, spot) * 0.92,
+                max(strike_target, spot) * 1.08,
+            ),
+            (spot * 0.85, spot * 1.15),
+        ]
+
+        for strike_lo, strike_hi in strike_bands:
+            req = OptionChainRequest(
+                underlying_symbol=underlying,
+                type=ContractType.CALL,
+                strike_price_gte=float(strike_lo),
+                strike_price_lte=float(strike_hi),
+                expiration_date_gte=exp_start.isoformat(),
+                expiration_date_lte=exp_end.isoformat(),
+            )
+            chain = self.option_client.get_option_chain(req)
+            iv = self._pick_chain_iv(chain, spot, strike_target, dte_target, today)
+            if iv is not None:
+                return iv
+
+        # Last resort: same expiry window but all strikes in range (heavier response).
+        req = OptionChainRequest(
+            underlying_symbol=underlying,
+            type=ContractType.CALL,
+            expiration_date_gte=exp_start.isoformat(),
+            expiration_date_lte=exp_end.isoformat(),
+        )
+        chain = self.option_client.get_option_chain(req)
+        return self._pick_chain_iv(chain, spot, strike_target, dte_target, today)
+
+    def _pick_chain_iv(self, chain, spot, strike_target, dte_target, today):
+        """
+        From a dict of option_symbol -> snapshot, choose the "best" call's IV.
+
+        `chain` comes from `get_option_chain`: each value has `.implied_volatility`.
+        We score each contract by how far its DTE and strike are from the targets
+        (lower score = better match). Returns IV as a float (usually 0–1, e.g. 0.32 = 32%).
+        """
+        if not chain:
+            return None
+        best_iv = None
+        best_score = None
+        for occ_sym, snap in chain.items():
+            if snap.implied_volatility is None:
+                continue
+            meta = _parse_osi_option_symbol(occ_sym)
+            if not meta or meta["right"] != "C":
+                continue
+            dte = (meta["expiration"] - today).days
+            # Mix calendar DTE error and normalized strike error into one score
+            score = abs(dte - dte_target) + abs(meta["strike"] - strike_target) / max(
+                spot, 1e-6
+            )
+            if best_score is None or score < best_score:
+                best_score = score
+                best_iv = snap.implied_volatility
+        return best_iv
+
 
 class VolatilityCrushAnalyzer:
 
@@ -174,7 +301,7 @@ class VolatilityCrushAnalyzer:
         ticker_frame.grid(row=0, column=1, sticky=(tk.W, tk.E), pady=(0, 8))
         ticker_frame.columnconfigure(0, weight=1)
 
-        self.ticker_var = tk.StringVar(value="AAPL")
+        self.ticker_var = tk.StringVar(value="NBIS")
         ttk.Entry(ticker_frame, textvariable=self.ticker_var, width=12, font=("Helvetica", 12)).grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 8))
 
 
@@ -360,7 +487,7 @@ class VolatilityCrushAnalyzer:
 
             # Daily bars need enough calendar days to include at least one session
             # (weekends/holidays); days=1 often returns an empty frame and looks like failure.
-            test_symbol = (self.ticker_var.get() or "").strip().upper() or "AAPL"
+            test_symbol = (self.ticker_var.get() or "").strip().upper() or "NBIS"
 
             df = self.alpaca_app.get_historical_data(test_symbol, days=7)
 
@@ -452,9 +579,6 @@ class VolatilityCrushAnalyzer:
         self.alpaca_app.market_data.clear()
         self.alpaca_app.historical_data.clear()
 
-        contract = self.create_equity_contract(self.ticker)
-        end_date = datetime.now()
-
         try:
             df = self.alpaca_app.get_historical_data(
                 self.ticker, timeframe=TimeFrame.Day, days=5
@@ -475,14 +599,136 @@ class VolatilityCrushAnalyzer:
             last = df.iloc[-1]
             spot = float(last["close"])
             self.spot_price_var.set(f"{spot:.2f}")
+            self.current_spot = spot
             self.alpaca_app.market_data[self.ticker] = df
-            self.update_status(f"Loaded {len(df)} daily bar(s) for {self.ticker}; spot (last close) {spot:.2f}")
+
+            dte_target = self._dte_target_for_options()
+            strike_target = self._strike_target_for_options(spot)
+            try:
+                iv = self.alpaca_app.get_near_atm_call_iv(
+                    self.ticker, spot, strike_target, dte_target
+                )
+            except Exception as opt_exc:
+                iv = None
+                self.update_status(f"Options IV fetch failed: {opt_exc}")
+
+            if iv is not None:
+                self.current_iv = iv
+                iv_pct = iv * 100.0 if 0 < iv < 3 else iv
+                self.iv_var.set(f"{iv_pct:.2f}")
+                self.update_status(
+                    f"{self.ticker}: spot {spot:.2f}, ATM call IV ~{iv_pct:.2f}% "
+                    f"(~{dte_target}d target)"
+                )
+            else:
+                self.current_iv = None
+                self.update_status(
+                    f"Loaded spot {spot:.2f}; IV not found (options data / filters / subscription)."
+                )
+
         except Exception as e:
             self.update_status(f"Fetch failed: {e}")
             messagebox.showerror("Error", str(e))
 
+        self.root.after(3000, self.process_market_data)
+
+
+    def process_market_data(self):
+        print('I am inside Process market data')
+        print('historical data', self.alpaca_app.historical_data)
+        if 1 in self.alpaca_app.historical_data and len(self.alpaca_app.historical_data[1]) > 0:
+            price_data = self.alpaca_app.historical_data[1]
+            latest_bar = price_data[1]
+            self.current_spot = latest_bar['close']
+            self.update_status(f"Latest closing price: ${self.current_spot: .2f}")
+        else: 
+            self.update_status("No historical price data received")
+            return
+
+        if 2 in self.alpaca_app.historical_data and len(self.alpaca_app.historical_data[2]) > 0:
+            iv_data = self.alpaca_app.historical_data[2]
+            latest_iv = iv_data[-1]
+            self.current_iv = latest_iv['close']
+            self.update_status(f"Latest closing price: ${self.current_spot:.2f}")
+        else:
+            self.update_status("No historical price data received")
+            return
+
+        self.spot_price_var.set(f"{self.current_spot:.2f}")
+        self.strike_var.set(f"{self.current_spot:.2f}")
+        self.iv_var.set(f"{self.current_iv:.4f}")
+
+        self.price_current_straddle()
+
+
+    def price_current_straddle(self):
+        try:
+            spot_price = float(self.spot_price_var.get())
+            strike_price = float(self.spot_price_var.get())
+            iv_percent = float(self.iv_var.get())
+            days_to_expiry = int(self.days_var.get())
+        except ValueError:
+            messagebox.showerror("Error", "Please enter a valid number for all parameters")
+            return
+
+        iv_decimal = iv_percent / 100
+        T = days_to_expiry / 365
+        r = self.risk_free_rate
+
+        call_price = self.black_scholes_call(spot_price, strike_price, T, r, iv_decimal)
+        put_price = self.black_scholes_put(spot_price, strike_price, T, r, iv_decimal)
+        straddle_price = call_price + put_price
+
+        delta = self.calculate_delta(spot_price, strike_price, T, r, iv_decimal, 'call') + self.calculate_delta(spot_price, strike_price, T, r, iv_decimal, 'put')
+        gamma = self.calculate_gamma(spot_price, strike_price, T, r, iv_decimal)
+        vega = self.calculate_vega(spot_price, strike_price, T, r, iv_decimal)*2
+        theta = self.calculate_theta(spot_price, strike_price, T, r, iv_decimal, 'call') + self.calculate_delta(spot_price, strike_price, T, r, iv_decimal, 'put')
+
+
+        self.call_price_label.config(text=f"${call_price:.2f}", foreground='green')
+        self.put_price_label.congig(text=f"${put_price:.2f}", foreground='green')
+        self.straddle_price_label.config(text=f"${straddle_price:.2f}", foreground='green')
+
+        # delta - gamma - vega - theta 
+        self.delta_label.config(text=f"{delta:.3f}")
+        self.gamma_label.config(text=f"{gamma:.3f}")
+        self.vega_label.config(text=f"{vega:.2f}")
+        self.theta_label.config(text=f"{theta:.2f}")
+
+        self.analyze_btn.config('normal')
+
+        if not self.new_spot_price.get():
+            self.new_spot_price.set(f"{spot_price:.2f}")
+        if not self.new_iv_var.get():
+            self.new_iv_var.set(f"{iv_percent}")
+
+        self.update_status(f"Straddle priced: ${straddle_price}, Call: ${call_price:.2f} + Put: ${put_price:.2f}")
+
+    def analyze_scenario(self):
+        try:
+            new_spot = float(self.new_spot_price.get())
+            new_iv = float(self.new_iv_var.get())
+        except ValueError:
+            messagebox.showerror("Error", "Invalid spot price or IV values")
+            return
 
         
+
+    def _dte_target_for_options(self):
+        raw = (self.days_var.get() or "").strip()
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            return 30
+
+    def _strike_target_for_options(self, spot):
+        raw = (self.strike_price_var.get() or "").strip()
+        if not raw:
+            return spot
+        try:
+            return float(raw)
+        except ValueError:
+            return spot
 
 
 
