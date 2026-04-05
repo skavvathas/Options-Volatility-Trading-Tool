@@ -687,7 +687,7 @@ class VolatilityCrushAnalyzer:
 
 
         self.call_price_label.config(text=f"${call_price:.2f}", foreground='green')
-        self.put_price_label.congig(text=f"${put_price:.2f}", foreground='green')
+        self.put_price_label.config(text=f"${put_price:.2f}", foreground='green')
         self.straddle_price_label.config(text=f"${straddle_price:.2f}", foreground='green')
 
         # delta - gamma - vega - theta 
@@ -790,7 +790,7 @@ class VolatilityCrushAnalyzer:
         d1 = (np.log(S/K) + (r + 0.5*sigma**2)*T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
 
-        if option_call == 'call':
+        if option_type == 'call':
             theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) - r * K * np.exp(-r*T) * norm.cdf(d2)) / 365
         else:
             theta = (-S * norm.pdf(d1) * sigma / (2 * np.sqrt(T)) + r * K * np.exp(-r*T) * norm.cdf(d2)) / 365
